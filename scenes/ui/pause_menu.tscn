@@ -1,0 +1,10 @@
+[gd_scene format=3 uid="uid://bnuwfhmyf6mmm"]
+
+[ext_resource type="Script" uid="uid://cikwko6k76c6m" path="res://scenes/ui/pause_menu.gd" id="1_6tw0m"]
+
+[node name="PauseMenu" type="CanvasLayer" unique_id=924904016]
+script = ExtResource("1_6tw0m")
+
+[node name="Panel" type="Panel" parent="." unique_id=1068779147]
+offset_right = 40.0
+offset_bottom = 40.0
