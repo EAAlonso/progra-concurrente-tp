@@ -1,6 +1,8 @@
-[gd_scene format=3 uid="uid://b3d2g8gl54k7k"]
+[gd_scene load_steps=6 format=3 uid="uid://b3d2g8gl54k7k"]
 
 [ext_resource type="Script" uid="uid://bip4nfoytppkx" path="res://scenes/game/game.gd" id="1_sul5r"]
+[ext_resource type="PackedScene" uid="uid://cu4pnet80h04m" path="res://scenes/npc/threaded_npc.tscn" id="2_tnpc"]
+[ext_resource type="Script" uid="uid://cqxxj8bf071n6" path="res://scenes/npc/npc_thread_pool.gd" id="3_pool"]
 
 [sub_resource type="PlaneMesh" id="PlaneMesh_ifgtf"]
 size = Vector2(20, 20)
@@ -22,3 +24,9 @@ shape = SubResource("BoxShape3D_sul5r")
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=1133832815]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 6.5117655, 0)
 shadow_enabled = true
+
+[node name="NPCThreadPool" type="Node3D" parent="."]
+script = ExtResource("3_pool")
+npc_scene = ExtResource("2_tnpc")
+npcs_per_player = 30
+worker_count = 4
