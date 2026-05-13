@@ -1,20 +1,29 @@
 extends Node3D
 
 @export var npc_scene: PackedScene
+@export var path_node_path: NodePath
 @export var npcs_per_player := 30
 @export var worker_count := 4
 @export var movement_radius := 1.25
 @export var movement_speed := 1.5
 @export var npc_spacing := 1.8
+@export var path_spacing := 0.7
+@export var random_offset_min := 0.10
+@export var random_offset_max := 0.50
 
 var _workers: Array[Thread] = []
 var _job_semaphore := Semaphore.new()
 var _job_mutex := Mutex.new()
 var _state_mutex := Mutex.new()
+var _rng := RandomNumberGenerator.new()
 var _jobs: Array[Dictionary] = []
 var _states: Array[Dictionary] = []
 var _npcs: Array[Node3D] = []
 var _origins: Array[Vector3] = []
+var _path_distance_offsets: Array[float] = []
+var _lateral_offsets: Array[float] = []
+var _path_points: Array[Vector3] = []
+var _path_length: float = 0.0
 var _running := false
 var _queued_jobs := 0
 var _finished_jobs := 0
@@ -25,6 +34,8 @@ func _ready():
 	if npc_scene == null:
 		npc_scene = preload("res://scenes/npc/threaded_npc.tscn")
 
+	_rng.randomize()
+	_refresh_path_cache()
 	_start_workers()
 	set_player_count(_get_current_player_count())
 
@@ -40,8 +51,14 @@ func _exit_tree():
 
 
 func set_player_count(player_count: int):
+	_refresh_path_cache()
 	var npc_count: int = int(max(1, player_count)) * npcs_per_player
 	_rebuild_npcs(npc_count)
+
+
+func refresh_path():
+	_wait_for_pending_jobs()
+	_refresh_path_cache()
 
 
 func _get_current_player_count() -> int:
@@ -88,8 +105,13 @@ func _rebuild_npcs(npc_count: int):
 	_npcs.clear()
 	_origins.clear()
 	_states.clear()
+	_path_distance_offsets.clear()
+	_lateral_offsets.clear()
 
 	for i in range(npc_count):
+		_path_distance_offsets.append(_random_signed_offset())
+		_lateral_offsets.append(_random_signed_offset())
+
 		var npc := npc_scene.instantiate() as Node3D
 		var origin := _calculate_origin(i)
 
@@ -106,6 +128,11 @@ func _rebuild_npcs(npc_count: int):
 
 
 func _calculate_origin(index: int) -> Vector3:
+	if not _path_points.is_empty():
+		var distance: float = _calculate_path_distance(index)
+		var sample: Dictionary = _sample_path(_path_points, _path_length, distance)
+		return sample["position"] + sample["right"] * _calculate_lateral_offset(index)
+
 	var columns: int = int(max(1, int(ceil(sqrt(float(npcs_per_player))))))
 	var player_index: int = int(index / npcs_per_player)
 	var local_index: int = index % npcs_per_player
@@ -130,6 +157,10 @@ func _queue_frame_jobs():
 			"phase": float(i) * 0.37,
 			"movement_radius": movement_radius,
 			"movement_speed": movement_speed,
+			"path_points": _path_points,
+			"path_length": _path_length,
+			"path_offset": _calculate_path_distance(i),
+			"lateral_offset": _calculate_lateral_offset(i),
 		})
 
 	_job_mutex.lock()
@@ -166,6 +197,63 @@ func _wait_for_pending_jobs():
 		OS.delay_msec(1)
 
 
+func _refresh_path_cache():
+	_path_points.clear()
+	_path_length = 0.0
+
+	if String(path_node_path).is_empty():
+		return
+
+	var path: Path3D = get_node_or_null(path_node_path) as Path3D
+	if path == null or path.curve == null:
+		return
+
+	var baked_points: PackedVector3Array = path.curve.get_baked_points()
+	for point in baked_points:
+		_path_points.append(path.to_global(point))
+
+	_path_length = _calculate_path_length(_path_points)
+
+
+func _calculate_path_length(points: Array[Vector3]) -> float:
+	var length: float = 0.0
+
+	for i in range(points.size() - 1):
+		length += points[i].distance_to(points[i + 1])
+
+	return length
+
+
+func _sample_path_position(distance: float) -> Vector3:
+	var sample: Dictionary = _sample_path(_path_points, _path_length, distance)
+	return sample["position"]
+
+
+func _calculate_path_distance(index: int) -> float:
+	return float(index) * path_spacing + _get_offset(_path_distance_offsets, index)
+
+
+func _calculate_lateral_offset(index: int) -> float:
+	return _get_offset(_lateral_offsets, index)
+
+
+func _random_signed_offset() -> float:
+	var magnitude: float = _rng.randf_range(random_offset_min, random_offset_max)
+	var sign: float = 1.0
+
+	if _rng.randi_range(0, 1) == 0:
+		sign = -1.0
+
+	return magnitude * sign
+
+
+func _get_offset(offsets: Array[float], index: int) -> float:
+	if index >= 0 and index < offsets.size():
+		return offsets[index]
+
+	return 0.0
+
+
 func _worker_loop():
 	while true:
 		_job_semaphore.wait()
@@ -194,19 +282,85 @@ func _worker_loop():
 
 
 func _simulate_npc(job: Dictionary) -> Dictionary:
-	var time := float(job["time"])
-	var phase := float(job["phase"])
+	var time: float = float(job["time"])
+	var phase: float = float(job["phase"])
 	var origin: Vector3 = job["origin"]
-	var radius := float(job["movement_radius"])
-	var speed := float(job["movement_speed"])
+	var radius: float = float(job["movement_radius"])
+	var speed: float = float(job["movement_speed"])
 	var angle: float = time * speed + phase
-	var next_position: Vector3 = origin + Vector3(
-		cos(angle) * radius,
-		0.0,
-		sin(angle) * radius
-	)
+	var next_position: Vector3
+	var rotation_y: float
+
+	if float(job["path_length"]) > 0.0:
+		var points: Array = job["path_points"]
+		var distance: float = time * speed * 2.0 + float(job["path_offset"])
+		var path_sample: Dictionary = _sample_path(points, float(job["path_length"]), distance)
+		next_position = path_sample["position"] + path_sample["right"] * float(job["lateral_offset"])
+		rotation_y = path_sample["rotation_y"]
+	else:
+		next_position = origin + Vector3(
+			cos(angle) * radius,
+			0.0,
+			sin(angle) * radius
+		)
+		rotation_y = -angle
 
 	return {
 		"position": next_position,
-		"rotation_y": -angle,
+		"rotation_y": rotation_y,
 	}
+
+
+func _sample_path(points: Array, path_length: float, distance: float) -> Dictionary:
+	if points.size() == 0:
+		return {
+			"position": Vector3.ZERO,
+			"right": Vector3.RIGHT,
+			"rotation_y": 0.0,
+		}
+
+	if points.size() == 1 or path_length <= 0.0:
+		return {
+			"position": points[0],
+			"right": Vector3.RIGHT,
+			"rotation_y": 0.0,
+		}
+
+	var wrapped_distance: float = _ping_pong_distance(distance, path_length)
+	var traveled: float = 0.0
+
+	for i in range(points.size() - 1):
+		var from: Vector3 = points[i]
+		var to: Vector3 = points[i + 1]
+		var segment_length: float = from.distance_to(to)
+		if segment_length <= 0.001:
+			continue
+
+		if traveled + segment_length >= wrapped_distance:
+			var t: float = (wrapped_distance - traveled) / segment_length
+			var direction: Vector3 = (to - from).normalized()
+
+			return {
+				"position": from.lerp(to, t),
+				"right": direction.cross(Vector3.UP).normalized(),
+				"rotation_y": atan2(direction.x, direction.z),
+			}
+
+		traveled += segment_length
+
+	var last_direction: Vector3 = (points[points.size() - 1] - points[points.size() - 2]).normalized()
+	return {
+		"position": points[points.size() - 1],
+		"right": last_direction.cross(Vector3.UP).normalized(),
+		"rotation_y": atan2(last_direction.x, last_direction.z),
+	}
+
+
+func _ping_pong_distance(distance: float, path_length: float) -> float:
+	var cycle_length: float = path_length * 2.0
+	var wrapped_distance: float = fposmod(distance, cycle_length)
+
+	if wrapped_distance > path_length:
+		return cycle_length - wrapped_distance
+
+	return wrapped_distance
