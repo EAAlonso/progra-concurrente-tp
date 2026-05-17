@@ -7,7 +7,8 @@ extends Node3D
 @export var movement_radius := 1.25
 @export var movement_speed := 1.5
 @export var npc_spacing := 1.8
-@export var path_spacing := 0.7
+@export var hop_height := 0.18
+@export var hop_frequency := 7.5
 @export var random_offset_min := 0.10
 @export var random_offset_max := 0.50
 
@@ -109,7 +110,7 @@ func _rebuild_npcs(npc_count: int):
 	_lateral_offsets.clear()
 
 	for i in range(npc_count):
-		_path_distance_offsets.append(_random_signed_offset())
+		_path_distance_offsets.append(_random_path_distance())
 		_lateral_offsets.append(_random_signed_offset())
 
 		var npc := npc_scene.instantiate() as Node3D
@@ -157,6 +158,8 @@ func _queue_frame_jobs():
 			"phase": float(i) * 0.37,
 			"movement_radius": movement_radius,
 			"movement_speed": movement_speed,
+			"hop_height": hop_height,
+			"hop_frequency": hop_frequency,
 			"path_points": _path_points,
 			"path_length": _path_length,
 			"path_offset": _calculate_path_distance(i),
@@ -230,7 +233,7 @@ func _sample_path_position(distance: float) -> Vector3:
 
 
 func _calculate_path_distance(index: int) -> float:
-	return float(index) * path_spacing + _get_offset(_path_distance_offsets, index)
+	return _get_offset(_path_distance_offsets, index)
 
 
 func _calculate_lateral_offset(index: int) -> float:
@@ -245,6 +248,13 @@ func _random_signed_offset() -> float:
 		sign = -1.0
 
 	return magnitude * sign
+
+
+func _random_path_distance() -> float:
+	if _path_length <= 0.0:
+		return 0.0
+
+	return _rng.randf_range(0.0, _path_length)
 
 
 func _get_offset(offsets: Array[float], index: int) -> float:
@@ -287,6 +297,7 @@ func _simulate_npc(job: Dictionary) -> Dictionary:
 	var origin: Vector3 = job["origin"]
 	var radius: float = float(job["movement_radius"])
 	var speed: float = float(job["movement_speed"])
+	var hop: float = abs(sin(time * float(job["hop_frequency"]) + phase)) * float(job["hop_height"])
 	var angle: float = time * speed + phase
 	var next_position: Vector3
 	var rotation_y: float
@@ -304,6 +315,8 @@ func _simulate_npc(job: Dictionary) -> Dictionary:
 			sin(angle) * radius
 		)
 		rotation_y = -angle
+
+	next_position.y += hop
 
 	return {
 		"position": next_position,
