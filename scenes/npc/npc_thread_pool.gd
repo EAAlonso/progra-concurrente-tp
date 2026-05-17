@@ -339,7 +339,14 @@ func _sample_path(points: Array, path_length: float, distance: float) -> Diction
 			"rotation_y": 0.0,
 		}
 
-	var wrapped_distance: float = _ping_pong_distance(distance, path_length)
+	var cycle_length: float = path_length * 2.0
+	var cycle_distance: float = fposmod(distance, cycle_length)
+	var is_returning: bool = cycle_distance > path_length
+	var wrapped_distance: float = path_length
+	if is_returning:
+		wrapped_distance = cycle_length - cycle_distance
+	else:
+		wrapped_distance = cycle_distance
 	var traveled: float = 0.0
 
 	for i in range(points.size() - 1):
@@ -351,29 +358,26 @@ func _sample_path(points: Array, path_length: float, distance: float) -> Diction
 
 		if traveled + segment_length >= wrapped_distance:
 			var t: float = (wrapped_distance - traveled) / segment_length
-			var direction: Vector3 = (to - from).normalized()
+			var segment_direction: Vector3 = (to - from).normalized()
+			var facing_direction: Vector3 = segment_direction
+			if is_returning:
+				facing_direction = -facing_direction
 
 			return {
 				"position": from.lerp(to, t),
-				"right": direction.cross(Vector3.UP).normalized(),
-				"rotation_y": atan2(direction.x, direction.z),
+				"right": segment_direction.cross(Vector3.UP).normalized(),
+				"rotation_y": atan2(facing_direction.x, facing_direction.z),
 			}
 
 		traveled += segment_length
 
-	var last_direction: Vector3 = (points[points.size() - 1] - points[points.size() - 2]).normalized()
+	var last_segment_direction: Vector3 = (points[points.size() - 1] - points[points.size() - 2]).normalized()
+	var last_facing_direction: Vector3 = last_segment_direction
+	if is_returning:
+		last_facing_direction = -last_facing_direction
+
 	return {
 		"position": points[points.size() - 1],
-		"right": last_direction.cross(Vector3.UP).normalized(),
-		"rotation_y": atan2(last_direction.x, last_direction.z),
+		"right": last_segment_direction.cross(Vector3.UP).normalized(),
+		"rotation_y": atan2(last_facing_direction.x, last_facing_direction.z),
 	}
-
-
-func _ping_pong_distance(distance: float, path_length: float) -> float:
-	var cycle_length: float = path_length * 2.0
-	var wrapped_distance: float = fposmod(distance, cycle_length)
-
-	if wrapped_distance > path_length:
-		return cycle_length - wrapped_distance
-
-	return wrapped_distance

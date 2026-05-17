@@ -25,10 +25,6 @@ func _unhandled_input(event):
 		head.rotate_x(-event.relative.y * MOUSE_SENSITIVITY)
 		# Limitar la mirada arriba/abajo a 90 grados
 		head.rotation.x = clamp(head.rotation.x, -PI/2, PI/2)
-	# Soltar el mouse con Escape
-	if event.is_action_pressed("ui_cancel"):
-		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-
 func _physics_process(delta):
 	if not is_local_player():
 		return

@@ -1,9 +1,14 @@
 extends Node3D
 
 @onready var npc_thread_pool = $NPCThreadPool
+@onready var pause_menu = $PauseMenu
 
 
 func _ready():
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	pause_menu.resume_requested.connect(_resume_game)
+	pause_menu.quit_requested.connect(_quit_to_desktop)
+
 	# Modo debug: corre en singleplayer
 	if "--debug_solo" in OS.get_cmdline_args():
 		spawn_player(1)
@@ -34,3 +39,26 @@ func _get_player_count() -> int:
 		return multiplayer.get_peers().size() + 1
 
 	return 1
+
+func _input(event):
+	if event.is_action_pressed("ui_cancel"):
+		_toggle_pause_menu()
+		get_viewport().set_input_as_handled()
+
+func _toggle_pause_menu():
+	if get_tree().paused:
+		_resume_game()
+	else:
+		_pause_game()
+
+func _pause_game():
+	get_tree().paused = true
+	pause_menu.show_menu()
+
+func _resume_game():
+	get_tree().paused = false
+	pause_menu.hide_menu()
+
+func _quit_to_desktop():
+	multiplayer.multiplayer_peer = null
+	get_tree().quit()
