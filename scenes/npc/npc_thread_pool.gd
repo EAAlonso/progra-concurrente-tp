@@ -200,6 +200,7 @@ func _wait_for_pending_jobs():
 		OS.delay_msec(1)
 
 
+# precalculo y guardado en cache de los puntos del path con su longitud total
 func _refresh_path_cache():
 	_path_points.clear()
 	_path_length = 0.0
@@ -227,6 +228,9 @@ func _calculate_path_length(points: Array[Vector3]) -> float:
 	return length
 
 
+# devuelve el punto en donde estaria si se recorren X de distancia sobre ese path
+# ej: distance = 5, la func devuelve el punto en donde estaria si avanzo 5 sobre
+#     el path
 func _sample_path_position(distance: float) -> Vector3:
 	var sample: Dictionary = _sample_path(_path_points, _path_length, distance)
 	return sample["position"]
@@ -264,6 +268,11 @@ func _get_offset(offsets: Array[float], index: int) -> float:
 	return 0.0
 
 
+## func que reparte la simulacion de NPCs entre varios hilos
+## esto es para que en vez de tener 500 NPCs en un hilo principal
+## se separen en varios workers
+## ej: worker 1: NPC 10, NPC 7 y NPC 2
+##     worker 2: NPC 3, NPC 9 y NPC 1
 func _worker_loop():
 	while true:
 		_job_semaphore.wait()
@@ -291,6 +300,7 @@ func _worker_loop():
 		_job_mutex.unlock()
 
 
+## movimiento tipo saltito del NPC + si no hay path se mueve en circulo 
 func _simulate_npc(job: Dictionary) -> Dictionary:
 	var time: float = float(job["time"])
 	var phase: float = float(job["phase"])
@@ -324,6 +334,8 @@ func _simulate_npc(job: Dictionary) -> Dictionary:
 	}
 
 
+## func para que un NPC se mueva sobre una lista de puntos como si fuera una 
+## ruta
 func _sample_path(points: Array, path_length: float, distance: float) -> Dictionary:
 	if points.size() == 0:
 		return {
